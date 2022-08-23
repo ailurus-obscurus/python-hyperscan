@@ -1,55 +1,104 @@
 name: python-hyperscan workflow
 on: [push]
+env:
+  pcre-version: 8.45
+  hyperscan-version: v5.4.0
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: DoozyX/clang-format-lint-action@v0.11
-        with:
-          source: "./src"
-          extensions: "c"
-          clangFormatVersion: 9
-          inplace: True
-      - uses: EndBug/add-and-commit@v4
-        with:
-          message: "style: clang-format"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  build:
+  compile-libraries:
     runs-on: ${{ matrix.platform }}
-    needs: lint
-    container:
-      image: darvid/manylinux-hyperscan:5.4.0
+    strategy:
+      matrix:
+        platform: [macos-latest]
+    steps:
+      - name: Cache pcre lib
+        id: cache-pcre-macos
+        uses: actions/cache@v3
+        with:
+          path: pcre-lib
+          key: pcre-lib-macos-${{ env.pcre-version }}
+
+      - name: Build pcre on macos
+        if: ${{ startsWith(matrix.platform, 'macos') && (steps.cache-pcre-macos.outputs.cache-hit != 'true') }}
+        run: |
+          wget -qO- https://sourceforge.net/projects/pcre/files/pcre/${{ env.pcre-version }}/pcre-${{ env.pcre-version }}.tar.gz/download | tar xvz
+          mv pcre-${{ env.pcre-version }} pcre-lib
+          cd pcre-lib
+          sudo mkdir /opt/pcre-build
+          ./configure --prefix=/opt/pcre-lib --enable-unicode-properties --enable-utf
+          sudo make && sudo make install
+          sudo mv /opt/pcre-build build
+
+      - name: Cache hyperscan lib
+        id: cache-hyperscan-macos
+        uses: actions/cache@v3
+        with:
+          path: hyperscan-lib
+          key: hyperscan-lib-mac-os-${{ env.hyperscan-version }}
+
+      - name: Build hyperscan on macos
+        if: ${{ startsWith(matrix.platform, 'macos') && (steps.cache-hyperscan-macos.outputs.cache-hit != 'true') }}
+        run: |
+          brew install cmake boost ragel
+          git clone -b ${{ env.hyperscan-version }} https://github.com/intel/hyperscan.git
+          mkdir -p hyperscan/build
+          cd hyperscan/build
+          sudo mkdir /opt/hyperscan-lib
+          cmake -DCMAKE_INSTALL_PREFIX:PATH=/opt/hyperscan-lib -DBUILD_STATIC_AND_SHARED=ON -DPCRE_SOURCE=../../pcre-lib ../
+          make && sudo make install
+          cd ../..
+          sudo mv /opt/hyperscan-lib .
+  build-wheels:
+    runs-on: ${{ matrix.platform }}
+    needs: compile-libraries
     strategy:
       matrix:
         # Only Linux is supported at the moment
-        platform: [ubuntu-latest]
-        python-version:
-          - cp36-cp36m
-          - cp37-cp37m
-          - cp38-cp38
-          - cp39-cp39
-          - cp310-cp310
-    env:
-      PYTHON_VERSION: ${{ matrix.python-version }}
+        platform: [macos-latest]
+        python-version: ["3.6", "3.7", "3.8", "3.9", "3.10"]
     steps:
-      - uses: actions/checkout@v2
+      - name: Cache pcre lib
+        id: cache-pcre-macos
+        uses: actions/cache@v3
         with:
-          fetch-depth: 0
+          path: ~/pcre-lib
+          key: pcre-lib-macos-${{ env.pcre-version }}
+      - name: Cache hyperscan lib
+        id: cache-hyperscan-macos
+        uses: actions/cache@v3
+        with:
+          path: ~/hyperscan-lib
+          key: hyperscan-lib-mac-os-${{ env.hyperscan-version }}
+      - name: PCRE lib cache miss macos
+        if: ${{ startsWith(matrix.platform, 'macos') && (steps.cache-pcre-macos.outputs.cache-hit != 'true') }}
+        run: exit 1
+      - name: Hyperscan lib cache miss macos
+        if: ${{ startsWith(matrix.platform, 'macos') && (steps.cache-hyperscan-macos.outputs.cache-hit != 'true') }}
+        run: exit 1
+      - uses: actions/checkout@v2
+      - name: Setup macos
+        if: ${{ startsWith(matrix.platform, 'macos') }}
+        run: |
+          brew install clang-format
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$HOME/hyperscan-lib/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$HOME/hyperscan-lib/lib/pkgconfig:$HOME/pcre-lib/build/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+          echo "C_INCLUDE_PATH=$HOME/hyperscan-lib/include/hs:$C_INCLUDE_PATH" >> $GITHUB_ENV
+      - name: List lib 2
+        run: ls hyperscan-lib
+      - name: List lib
+        run: ls $HOME/hyperscan-lib
+      - uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run image
+        uses: abatilo/actions-poetry@v2.0.0
+        with:
+          poetry-version: "1.1.11"
       - name: Build and test
         run: |
-          PYTHONDIR=/opt/python/${PYTHON_VERSION}
-          git config --global user.name "github-actions"
-          git config --global user.email "action@github.com"
-          ${PYTHONDIR}/bin/pip install -UI poetry setuptools
-          ${PYTHONDIR}/bin/poetry install --no-root
-          ${PYTHONDIR}/bin/poetry run semantic-release version -v DEBUG \
-            -D commit_author="github-actions <action@github.com>"
-          ${PYTHONDIR}/bin/poetry install
-          ${PYTHONDIR}/bin/poetry build -vvv
-          /usr/bin/ldd src/hyperscan/_hyperscan.*.so
-          ${PYTHONDIR}/bin/poetry run pytest -vvv tests/
+          pip install -UI setuptools
+          poetry install
+          poetry build -vvv
+          poetry run pytest -vvv tests/
       - name: Archive dist
         uses: actions/upload-artifact@v2
         with:
@@ -57,110 +106,3 @@ jobs:
           path: |
             dist/*.whl
             dist/*.tar.gz
-  prepare_release:
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v2
-        with:
-          python-version: "3.9"
-          architecture: "x64"
-      - name: Generate release changelog
-        run: |
-          pip install "python-semantic-release==7.6.0"
-          semantic-release changelog -v DEBUG > RELEASE_CHANGELOG
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Archive release changelog
-        uses: actions/upload-artifact@v2
-        with:
-          name: changelog
-          path: |
-            RELEASE_CHANGELOG
-      - name: Remove release changelog
-        run: rm -f RELEASE_CHANGELOG
-      - name: Python semantic release
-        uses: relekang/python-semantic-release@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-  release:
-    runs-on: ubuntu-latest
-    needs: prepare_release
-    if: ${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-      - name: Pull from origin
-        run: git pull origin master
-      - name: Download dist
-        uses: actions/download-artifact@v2
-        with:
-          name: dist
-          path: dist
-      - name: Display dist
-        run: ls -R
-        working-directory: dist
-      - name: Capture package version
-        id: package_version
-        run: |
-          tar xvzf dist/*.tar.gz --no-anchored --strip=1 PKG-INFO
-          VERSION=$(grep "^Version" PKG-INFO | tr -d ' ' | cut -d: -f2)
-          rm -f PKG-INFO
-          echo "Package version: $VERSION"
-          echo "::set-output name=release_version::v$VERSION"
-      - name: Capture current commit tag
-        id: git_tag
-        run: |
-          TAG_VERSION=$(git tag --points-at HEAD)
-          echo "Current tag: $TAG_VERSION"
-          echo "::set-output name=current_tag::$TAG_VERSION"
-      - name: Download release changelog
-        uses: actions/download-artifact@v2
-        if: ${{ steps.git_tag.outputs.current_tag == steps.package_version.outputs.release_version }}
-        with:
-          name: changelog
-      - name: Create release
-        id: create_release
-        if: ${{ steps.git_tag.outputs.current_tag == steps.package_version.outputs.release_version }}
-        uses: softprops/action-gh-release@v1
-        with:
-          body_path: RELEASE_CHANGELOG
-          draft: false
-          name: Release ${{ steps.package_version.outputs.release_version }}
-          prerelease: false
-          tag_name: ${{ steps.package_version.outputs.release_version }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Delete RELEASE_CHANGELOG
-        run: rm -f RELEASE_CHANGELOG
-      - name: Upload release assets
-        uses: actions/github-script@v3
-        if: ${{ steps.git_tag.outputs.current_tag == steps.package_version.outputs.release_version }}
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const path = require('path');
-            const fs = require('fs');
-            const release_id = '${{ steps.create_release.outputs.id }}';
-            for (let file of await fs.readdirSync('./dist')) {
-              if (path.extname(file) === '.gz' || path.extname(file) === '.whl') {
-                console.log('uploadReleaseAsset', file);
-                await github.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release_id,
-                  name: file,
-                  data: await fs.readFileSync(`./dist/${file}`)
-                });
-              }
-            }
-      - name: Upload to PyPI
-        if: ${{ steps.git_tag.outputs.current_tag == steps.package_version.outputs.release_version }}
-        uses: pypa/gh-action-pypi-publish@master
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_TOKEN }}
