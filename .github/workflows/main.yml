@@ -14,7 +14,7 @@ jobs:
         id: cache-pcre-macos
         uses: actions/cache@v3
         with:
-          path: pcre-lib
+          path: ~/pcre-lib
           key: pcre-lib-macos-${{ env.pcre-version }}
 
       - name: Build pcre on macos
@@ -27,12 +27,14 @@ jobs:
           ./configure --prefix=/opt/pcre-lib --enable-unicode-properties --enable-utf
           sudo make && sudo make install
           sudo mv /opt/pcre-build build
+          cd ..
+          mv pcre-lib ~/
 
       - name: Cache hyperscan lib
         id: cache-hyperscan-macos
         uses: actions/cache@v3
         with:
-          path: hyperscan-lib
+          path: ~/hyperscan-lib
           key: hyperscan-lib-mac-os-${{ env.hyperscan-version }}
 
       - name: Build hyperscan on macos
@@ -45,8 +47,7 @@ jobs:
           sudo mkdir /opt/hyperscan-lib
           cmake -DCMAKE_INSTALL_PREFIX:PATH=/opt/hyperscan-lib -DBUILD_STATIC_AND_SHARED=ON -DPCRE_SOURCE=../../pcre-lib ../
           make && sudo make install
-          cd ../..
-          sudo mv /opt/hyperscan-lib .
+          sudo mv /opt/hyperscan-lib ~/
   build-wheels:
     runs-on: ${{ matrix.platform }}
     needs: compile-libraries
@@ -83,7 +84,7 @@ jobs:
           echo "PKG_CONFIG_PATH=$HOME/hyperscan-lib/lib/pkgconfig:$HOME/pcre-lib/build/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
           echo "C_INCLUDE_PATH=$HOME/hyperscan-lib/include/hs:$C_INCLUDE_PATH" >> $GITHUB_ENV
       - name: List lib 2
-        run: ls hyperscan-lib
+        run: ls ~/hyperscan-lib
       - name: List lib
         run: ls $HOME/hyperscan-lib
       - uses: actions/setup-python@v2
