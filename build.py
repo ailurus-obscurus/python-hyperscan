@@ -24,19 +24,12 @@ def pkgconfig(libs, optional="", static=False):
             [
                 # f"-Wl,-rpath={pcre_path}",
                 # "-l:libpcre.so",
-                "-l:libhs.a",
-                "-l:libchimera.a",
+                "-lhs",
+                "-lchimera",
             ],
         ),
     }
     ext_kwargs = {"extra_compile_args": []}
-    library_options = set(
-        subprocess.check_output(
-            ["pkg-config", optional, "--libs-only-l", *libs]
-        )
-        .decode()
-        .split()
-    )
     for lib in libs:
         for distutils_kwarg, (
             pkg_options,

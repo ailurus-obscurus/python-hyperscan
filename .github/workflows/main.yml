@@ -8,14 +8,14 @@ jobs:
     runs-on: ${{ matrix.platform }}
     strategy:
       matrix:
-        platform: [macos-latest]
+        platform: [macos-12]
     steps:
       - name: Cache pcre lib
         id: cache-pcre-macos
         uses: actions/cache@v3
         with:
           path: ~/pcre-lib
-          key: pcre-lib-macos-${{ env.pcre-version }}
+          key: pcre-lib-${{ env.pcre-version }}-macos-12
 
       - name: Build pcre on macos
         if: ${{ startsWith(matrix.platform, 'macos') && (steps.cache-pcre-macos.outputs.cache-hit != 'true') }}
@@ -25,7 +25,8 @@ jobs:
           cd pcre-lib
           sudo mkdir /opt/pcre-build
           ./configure --prefix=/opt/pcre-lib --enable-unicode-properties --enable-utf
-          sudo make && sudo make install
+          make && sudo make install
+          sudo cp -r .libs /opt/pcre-build/
           sudo mv /opt/pcre-build build
           cd ..
           mv pcre-lib ~/
@@ -35,26 +36,27 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/hyperscan-lib
-          key: hyperscan-lib-mac-os-${{ env.hyperscan-version }}
+          key: hyperscan-lib-${{ env.hyperscan-version }}-macos-12
 
       - name: Build hyperscan on macos
         if: ${{ startsWith(matrix.platform, 'macos') && (steps.cache-hyperscan-macos.outputs.cache-hit != 'true') }}
+        env:
+          CFLAGS: -fPIC
+          CXXFLAGS: -fPIC -D_GLIBCXX_USE_CXX11_ABI=1
         run: |
           brew install cmake boost ragel
           git clone -b ${{ env.hyperscan-version }} https://github.com/intel/hyperscan.git
           mkdir -p hyperscan/build
           cd hyperscan/build
-          sudo mkdir /opt/hyperscan-lib
-          cmake -DCMAKE_INSTALL_PREFIX:PATH=/opt/hyperscan-lib -DBUILD_STATIC_AND_SHARED=ON -DPCRE_SOURCE=../../pcre-lib ../
-          make && sudo make install
-          sudo mv /opt/hyperscan-lib ~/
+          cmake -DCMAKE_INSTALL_PREFIX:PATH=$HOME/hyperscan-lib -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS" -DPCRE_SOURCE=$HOME/pcre-lib ..
+          make -j10 && sudo make install
   build-wheels:
     runs-on: ${{ matrix.platform }}
     needs: compile-libraries
     strategy:
       matrix:
         # Only Linux is supported at the moment
-        platform: [macos-latest]
+        platform: [macos-12]
         python-version: ["3.6", "3.7", "3.8", "3.9", "3.10"]
     steps:
       - name: Cache pcre lib
@@ -62,13 +64,13 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/pcre-lib
-          key: pcre-lib-macos-${{ env.pcre-version }}
+          key: pcre-lib-${{ env.pcre-version }}-macos-12
       - name: Cache hyperscan lib
         id: cache-hyperscan-macos
         uses: actions/cache@v3
         with:
           path: ~/hyperscan-lib
-          key: hyperscan-lib-mac-os-${{ env.hyperscan-version }}
+          key: hyperscan-lib-${{ env.hyperscan-version }}-macos-12
       - name: PCRE lib cache miss macos
         if: ${{ startsWith(matrix.platform, 'macos') && (steps.cache-pcre-macos.outputs.cache-hit != 'true') }}
         run: exit 1
@@ -79,14 +81,8 @@ jobs:
       - name: Setup macos
         if: ${{ startsWith(matrix.platform, 'macos') }}
         run: |
-          brew install clang-format
-          echo "DYLD_FALLBACK_LIBRARY_PATH=$HOME/hyperscan-lib/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$HOME/hyperscan-lib/lib/pkgconfig:$HOME/pcre-lib/build/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-          echo "C_INCLUDE_PATH=$HOME/hyperscan-lib/include/hs:$C_INCLUDE_PATH" >> $GITHUB_ENV
-      - name: List lib 2
-        run: ls ~/hyperscan-lib
-      - name: List lib
-        run: ls $HOME/hyperscan-lib
+          echo "PKG_CONFIG_PATH=$HOME/hyperscan-lib/lib/pkgconfig" >> $GITHUB_ENV
+          echo "PCRE_PATH=$HOME/pcre-lib/build/.libs" >> $GITHUB_ENV
       - uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-version }}
@@ -100,10 +96,10 @@ jobs:
           poetry install
           poetry build -vvv
           poetry run pytest -vvv tests/
-      - name: Archive dist
+      - run: |
+          echo "WHEEL_NAME=$(basename $(ls dist/*.whl))" >> $GITHUB_ENV
+      - name: Archive macos wheel
         uses: actions/upload-artifact@v2
         with:
-          name: dist
-          path: |
-            dist/*.whl
-            dist/*.tar.gz
+          name: ${{ env.WHEEL_NAME }}
+          path: dist/*.whl
