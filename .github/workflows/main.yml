@@ -96,10 +96,8 @@ jobs:
           poetry install
           poetry build -vvv
           poetry run pytest -vvv tests/
-      - run: |
-          echo "WHEEL_NAME=$(basename $(ls dist/*.whl))" >> $GITHUB_ENV
       - name: Archive macos wheel
         uses: actions/upload-artifact@v2
         with:
-          name: ${{ env.WHEEL_NAME }}
+          name: macos-wheels
           path: dist/*.whl
