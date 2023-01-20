@@ -57,7 +57,7 @@ jobs:
       matrix:
         # Only Linux is supported at the moment
         platform: [macos-12]
-        python-version: ["3.6", "3.7", "3.8", "3.9", "3.10"]
+        python-version: ["3.8", "3.9", "3.10"]
     steps:
       - name: Cache pcre lib
         id: cache-pcre-macos
