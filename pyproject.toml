@@ -86,6 +86,12 @@ python-semantic-release = "^7.32.2"
 clang-format = "10.0.1"
 commitizen-emoji = "^0.1.5"
 
+[tool.poetry.group.dev.dependencies]
+black = "^22.12.0"
+matplotlib = "^3.6.2"
+memunit = "^0.5.2"
+ruff = "^0.0.211"
+
 [tool.semantic_release]
 build_command = false
 commit_author = "github-actions <action@github.com>"
