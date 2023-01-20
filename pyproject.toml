@@ -83,7 +83,7 @@ tox = "^3.20.1"
 commitizen = "^2.10.0"
 pre-commit = "^2.9.2"
 python-semantic-release = "^7.32.2"
-clang-format = "^9.0.0"
+clang-format = "10.0.1"
 commitizen-emoji = "^0.1.5"
 
 [tool.poetry.group.dev.dependencies]
