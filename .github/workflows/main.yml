@@ -1,7 +1,7 @@
 name: python-hyperscan workflow
 on: [push]
 env:
-  pcre-version: 8.45
+  pcre-version: 8.41
   hyperscan-version: v5.4.0
 jobs:
   compile-libraries:
@@ -45,7 +45,7 @@ jobs:
           CXXFLAGS: -fPIC -D_GLIBCXX_USE_CXX11_ABI=1
         run: |
           brew install cmake boost ragel
-          git clone -b ${{ env.hyperscan-version }} https://github.com/intel/hyperscan.git
+          git clone -b ${{ env.hyperscan-version }} https://github.com/VectorCamp/vectorscan.git hyperscan
           mkdir -p hyperscan/build
           cd hyperscan/build
           cmake -DCMAKE_INSTALL_PREFIX:PATH=$HOME/hyperscan-lib -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS" -DPCRE_SOURCE=$HOME/pcre-lib ..
